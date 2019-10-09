@@ -3,10 +3,17 @@ package hsql
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
 	"unicode"
+)
+
+var (
+	tagMapperName string = "sql"
+
+	ErrDestNil = errors.New("dest is nil")
 )
 
 func GetContext(ctx context.Context, db *sql.DB, dest interface{}, query string, args ...interface{}) error {
@@ -26,10 +33,13 @@ func TxQueryContext(ctx context.Context, tx *sql.Tx, dest interface{}, queryStr 
 }
 
 func first(ctx context.Context, db *sql.DB, tx *sql.Tx, dest interface{}, queryStr string, args ...interface{}) error {
+	if dest == nil {
+		return ErrDestNil
+	}
 	t := reflect.TypeOf(dest)
 	v := reflect.ValueOf(dest)
 	if t.Kind() != reflect.Ptr || t.Elem().Kind() != reflect.Struct {
-		return fmt.Errorf("dest invalid(%v,%v)", t.Kind(), t.Elem().Kind())
+		return fmt.Errorf("dest is invalid(%v,%v)", t.Kind(), t.Elem().Kind())
 	}
 
 	sliceType := reflect.SliceOf(t.Elem())
@@ -54,6 +64,10 @@ func first(ctx context.Context, db *sql.DB, tx *sql.Tx, dest interface{}, queryS
 }
 
 func query(ctx context.Context, db *sql.DB, tx *sql.Tx, dest interface{}, query string, args ...interface{}) error {
+	if dest == nil {
+		return ErrDestNil
+	}
+
 	var rows *sql.Rows
 	var err error
 	if tx == nil {
@@ -80,7 +94,7 @@ func findAuto(rows *sql.Rows, dest interface{}) error {
 	t := v.Type()
 
 	if t.Kind() != reflect.Ptr || t.Elem().Kind() != reflect.Slice {
-		return fmt.Errorf("dest invalid(%v,%v)", t.Kind(), t.Elem().Kind())
+		return fmt.Errorf("scan data invalid(%v,%v)", t.Kind(), t.Elem().Kind())
 	}
 
 	t = t.Elem()
@@ -93,7 +107,7 @@ func findAuto(rows *sql.Rows, dest interface{}) error {
 		isPtr = true
 		t = t.Elem().Elem() // struct
 	} else {
-		return fmt.Errorf("dest invalid(%v,%v)", t.Elem().Kind(), t.Elem().Elem().Kind())
+		return fmt.Errorf("scan data invalid(%v,%v)", t.Elem().Kind(), t.Elem().Elem().Kind())
 	}
 
 	for rows.Next() {
@@ -117,29 +131,36 @@ func findAuto(rows *sql.Rows, dest interface{}) error {
 
 func getFieldAddr(cols []string, dstVal reflect.Value) (scans []interface{}) {
 	scans = make([]interface{}, len(cols))
-	var noneField = sql.NullString{}
-	for i, name := range cols {
-		tmpName := name
+	dstType := dstVal.Type()
 
-		match := func(field string) bool {
-			if strings.ToLower(field) == CamelToUnderscore(tmpName) {
-				return true
+	for i, name := range cols {
+		scans[i] = &sql.NullString{}
+		for j := 0; j < dstType.NumField(); j++ {
+			if !dstVal.Field(j).CanSet() {
+				continue
 			}
 
-			tmpName = strings.Replace(tmpName, "_", "", -1)
-			field = strings.Replace(field, "_", "", -1)
-			return strings.ToLower(field) == strings.ToLower(tmpName)
-		}
-		fieldVal := dstVal.FieldByNameFunc(match)
-		if !fieldVal.IsValid() {
-			scans[i] = &noneField
-		} else {
-			scans[i] = fieldVal.Addr().Interface()
+			tag, ok := dstType.Field(j).Tag.Lookup(tagMapperName)
+			if !ok {
+				fieldVal := dstVal.FieldByNameFunc(func(field string) bool {
+					return CamelToUnderscore(name) == strings.ToLower(field)
+				})
+				if fieldVal.IsValid() {
+					scans[i] = fieldVal.Addr().Interface()
+				}
+				break
+			}
+
+			if strings.ToLower(name) == strings.ToLower(tag) {
+				scans[i] = dstVal.Field(j).Addr().Interface()
+				break
+			}
 		}
 	}
 	return scans
 }
 
+// 驼峰转下划线
 func CamelToUnderscore(name string) string {
 	buf := make([]rune, 0, len(name)+4)
 	var preIsUpper bool
@@ -157,6 +178,7 @@ func CamelToUnderscore(name string) string {
 	return string(buf)
 }
 
+// 下划线转驼峰
 func UnderscoreToCamel(name string) string {
 	name = strings.Replace(name, "_", " ", -1)
 

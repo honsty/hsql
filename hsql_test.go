@@ -11,14 +11,14 @@ import (
 )
 
 type UserInfo struct {
-	ID         int64
-	Name       string
-	Phone      string
-	FrontCover string
-	Address    string
-	Balance    int64
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID         int64     `sql:"id"`
+	Name       string    `sql:"name"`
+	Phone      string    `sql:"phone"`
+	FrontCover string    `sql:"front_cover"`
+	Address    string    `sql:"address"`
+	Balance    int64     `sql:"balance"`
+	CreatedAt  time.Time `sql:"created_at"`
+	UpdatedAt  time.Time `sql:"updated_at"`
 }
 
 var (
