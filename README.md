@@ -19,7 +19,13 @@ CREATE TABLE `users` (
 
 ## 查询
 
+- [x] 1.默认使用 tag(`sql`) 进行映射
+
 ```go
+    type UserInfo sturct{
+    	ID int64 `sql:"id"`
+    	UserName string `sql:"user_name"`
+    }
     var db *sql.DB
     query := "SELECT * FROM users WHERE ID < ?"
     list := make([]UserInfo, 0)
